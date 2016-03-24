@@ -21,6 +21,52 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 import argparse
+import os
+import shutil
+
+
+def copy_pacs(pbuilder_base, source, dest, distro, arch, version, pkg=""):
+    if pkg == "current":
+        pkg = ""
+    elif pkg != "":
+        pkg = "-" + pkg
+
+    dkms_src = pbuilder_base + "/" + source + "-" + distro + "-" + arch + \
+               "/result/" + "nvidia" + pkg + "-kernel-dkms_" + version + \
+               "_" + arch + ".deb"
+    dkms_dst = pbuilder_base + "/" + dest + "-" + distro + "-" + arch + \
+               "/result/" + "nvidia" + pkg + "-kernel-dkms_" + version + \
+               "_" + arch + ".deb"
+    if os.path.isfile(dkms_src) and not os.path.isfile(dkms_dst):
+        shutil.copy2(dkms_src, dkms_dst)
+
+    source_src = pbuilder_base + "/" + source + "-" + distro + "-" + arch + \
+               "/result/" + "nvidia" + pkg + "-kernel-source_" + version + \
+               "_" + arch + ".deb"
+    source_dst = pbuilder_base + "/" + dest + "-" + distro + "-" + arch + \
+               "/result/" + "nvidia" + pkg + "-kernel-source_" + version + \
+               "_" + arch + ".deb"
+    if os.path.isfile(source_src) and not os.path.isfile(source_dst):
+        shutil.copy2(source_src, source_dst)
+
+
+def delete_pacs(pbuilder_base, dest, distro, arch, version, pkg=""):
+    if pkg == "current":
+        pkg = ""
+    elif pkg != "":
+        pkg = "-" + pkg
+
+    dkms_dst = pbuilder_base + "/" + dest + "-" + distro + "-" + arch + \
+               "/result/" + "nvidia" + pkg + "-kernel-dkms_" + version + \
+               "_" + arch + ".deb"
+    if os.path.isfile(dkms_dst):
+        os.remove(dkms_dst)
+
+    source_dst = pbuilder_base + "/" + dest + "-" + distro + "-" + arch + \
+               "/result/" + "nvidia" + pkg + "-kernel-source_" + version + \
+               "_" + arch + ".deb"
+    if os.path.isfile(source_dst):
+        os.remove(source_dst)
 
 
 if __name__ == "__main__":
@@ -39,11 +85,41 @@ if __name__ == "__main__":
                                      "bootstrapped cowbuilder chroot with a"
                                      "name in the format: "
                                      "<TARGET>-<DISTRIBUTION>-<ARCH>")
+    parser.add_argument('-c', '--copy', action='store_false',
+                        help="Copy packages from source chroot to destination"
+                        " chroot (result subdirectory). Defaults to true.")
     parser.add_argument('-p', '--pbuilder-base-path',
                         default=pbuilderrc,
                         help="Path to pbuilder base directory. Defaults to "
                         "value of PBUILDER_BASE in /etc/pbuilderrc.")
+    parser.add_argument('-s', '--source', default='base',
+                        help="Source chroot name (source of packages). "
+                        "Defaults to base (eg: base-sid-amd64).")
+    parser.add_argument('-t', '--target', default='dkms',
+                        help="Destination chroot name (destination of "
+                        "packages and build host). "
+                        "Defaults to dkms (eg: dkms-sid-amd64).")
+    parser.add_argument('-d', '--distribution', default='sid',
+                        help='Chroot distribution. Defaults to sid.')
+    parser.add_argument('-a', '--archs', dest='archs', nargs='+',
+                        default=["amd64", "i386", "armhf"],
+                        help='amd64, i386 or armhf. Defaults to all of them.')
+    parser.add_argument('-n', '--nvidia-branch', default='current',
+                        help="Branch of nvidia packages (current, "
+                        "legacy-340xx, etc). Defaults to current.")
     parser.add_argument('-v', '--version', required=True,
                         help='Package version. Required.')
 
     args = parser.parse_args()
+
+    for arch in args.archs:
+        if args.copy:
+            copy_pacs(args.pbuilder_base_path, args.source, args.target,
+                      args.distribution, arch, args.version,
+                      args.nvidia_branch)
+
+    if args.copy:
+        for arch in args.archs:
+            delete_pacs(args.pbuilder_base_path, args.target,
+                        args.distribution, arch, args.version,
+                        args.nvidia_branch)
