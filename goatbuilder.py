@@ -21,8 +21,11 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 """
 import argparse
+import itertools
 import os
 import shutil
+import subprocess
+import time
 
 
 def copy_pacs(pbuilder_base, source, dest, distro, arch, version, pkg=""):
@@ -68,6 +71,32 @@ def delete_pacs(pbuilder_base, dest, distro, arch, version, pkg=""):
     if os.path.isfile(source_dst):
         os.remove(source_dst)
 
+def update_chroot(base, dist, arch):
+    env = os.environ.copy()
+    env["OS"] = base
+    env["ARCH"] = arch
+    env["DIST"] = dist
+
+    p = subprocess.Popen(["cowbuilder", "--update"], env=env)
+    p.base = base
+    p.arch = arch
+    p.dist = dist
+    return p
+
+
+def update_all_chroots(bases, dists, archs):
+    processes = []
+    for base, dist, arch in itertools.product(bases, dists, archs):
+        processes.append(update_chroot(base, dist, arch))
+        time.sleep(5)
+
+    for p in processes:
+        p.wait()
+        if p.returncode != 0:
+            print("Error while running:"
+                  " {} OS={} DIST={} ARCH={}".format(p.args, p.base, p.dist,
+                                                     p.arch))
+
 
 if __name__ == "__main__":
     with open("/etc/pbuilderrc") as file:
@@ -85,6 +114,8 @@ if __name__ == "__main__":
                                      "bootstrapped cowbuilder chroot with a"
                                      "name in the format: "
                                      "<TARGET>-<DISTRIBUTION>-<ARCH>")
+    parser.add_argument('-u', '--update', action='store_true',
+                        help='Update chroots. Defaults to false.')
     parser.add_argument('-c', '--copy', action='store_false',
                         help="Copy packages from source chroot to destination"
                         " chroot (result subdirectory). Defaults to true.")
@@ -117,6 +148,9 @@ if __name__ == "__main__":
             copy_pacs(args.pbuilder_base_path, args.source, args.target,
                       args.distribution, arch, args.version,
                       args.nvidia_branch)
+    if args.update:
+        update_all_chroots([args.source, args.target], [args.distribution],
+                           args.archs)
 
     if args.copy:
         for arch in args.archs:
