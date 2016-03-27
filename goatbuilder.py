@@ -163,6 +163,80 @@ def test_dkms(chr, pbuilder_base, base, dist, arch, version, pkg="current",
             print(chr.after)
 
 
+def test_source(chr, pbuilder_base, base, dist, arch, version, pkg="current",
+              prompt="root@.*:/.*#"):
+    if pkg != "":
+        pkg = "-" + pkg
+    if pkg == "-current":
+        deb = ""
+    else:
+        deb = pkg
+
+    chr.sendline("dpkg -i {0}/{1}-{2}-{3}/result/"
+                 "nvidia{5}-kernel-source"
+                 "_{4}_{3}.deb".format(pbuilder_base, base, dist, arch,
+                                       version, deb))
+    index = chr.expect(["Setting up nvidia{}-kernel-source".format(deb),
+               "Errors were encountered while processing"])
+    if index != 0:
+        raise Exception("Failed to dpkg -i {0}-{1}-{2}/result/"
+                 "nvidia{4}-kernel-source_{3}_{2}.deb".format(base, dist, arch,
+                                                         version, deb))
+    chr.expect(prompt)
+
+    chr.sendline("rm -rf /tmp/modules")
+    chr.expect(prompt)
+
+    chr.sendline("ls /usr/src | grep -e 'nvidia-kernel\.tar'")
+    chr.expect(prompt)
+
+    compression = re.search("nvidia-kernel\.tar\.(bz2|xz|gz)",
+                            chr.before.decode("utf-8"))
+
+    if compression.group(1) == "bz2":
+        chr.sendline("tar xjvf /usr/src/nvidia-kernel.tar.bz2 -C /tmp")
+    elif compression.group(1) == "xz":
+        chr.sendline("tar xJvf /usr/src/nvidia-kernel.tar.xz -C /tmp")
+    elif compression.group(1) == "gz":
+        chr.sendline("tar xzvf /usr/src/nvidia-kernel.tar.gz -C /tmp")
+    else:
+        raise Exception("Could not find nvidia-kernel tarball in /usr/src")
+    chr.expect(prompt)
+
+    chr.sendline("cd /tmp/modules/nvidia-kernel")
+    chr.expect(prompt)
+
+    kernel_arch = {"amd64": "amd64", "i386": "[4|5|6]86", "armhf": "armmp"}
+    chr.sendline("ls /usr/src |"
+                 " grep -e 'linux-headers.*{}'".format(kernel_arch[arch]))
+    chr.expect(prompt)
+
+    kernels = [m.group(1) for m in re.finditer("linux-headers-(.*)",
+                                    chr.before.decode("utf-8"))]
+    for k in kernels:
+        print("source build for kernel: {}".format(k))
+        chr.sendline("unset ARCH")
+        chr.expect(prompt)
+        chr.sendline("export KSRC=/usr/src/linux-headers-{}".format(k))
+        chr.expect(prompt)
+        chr.sendline("debian/rules clean")
+        chr.expect(prompt)
+        chr.sendline("debian/rules binary_modules")
+        index = chr.expect(["dpkg-deb: building package",
+                            "recipe for target 'modules' failed",
+                            pexpect.TIMEOUT])
+        chr.expect(prompt)
+        if index != 0:
+            print("Failed source build on kernel {}".format(k))
+            print(chr.before)
+            print(chr.after)
+        chr.sendline("debian/rules clean")
+        chr.expect(prompt)
+
+    chr.sendline("rm -rf /tmp/modules")
+    chr.expect(prompt)
+
+
 if __name__ == "__main__":
     with open("/etc/pbuilderrc") as file:
         text = file.read()
