@@ -23,6 +23,8 @@ SOFTWARE.
 import argparse
 import itertools
 import os
+import pexpect
+import re
 import shutil
 import subprocess
 import time
@@ -96,6 +98,69 @@ def update_all_chroots(bases, dists, archs):
             print("Error while running:"
                   " {} OS={} DIST={} ARCH={}".format(p.args, p.base, p.dist,
                                                      p.arch))
+
+
+def start_chr(pbuilder_base, base, dist, arch, prompt="root@.*:/.*#"):
+    env = os.environ.copy()
+    env["OS"] = base
+    env["ARCH"] = arch
+    env["DIST"] = dist
+
+    chr = pexpect.spawn("cowbuilder --login "
+                        "--bindmounts {}/{}-{}-{}".format(pbuilder_base, base,
+                                                          dist, arch),
+                        env=env, timeout=600)
+    chr.expect(prompt)
+
+    return chr
+
+
+def stop_chr(chroot_handle):
+    chroot_handle.sendline("exit")
+    chroot_handle.expect([pexpect.EOF])
+
+
+def test_dkms(chr, pbuilder_base, base, dist, arch, version, pkg="current",
+              prompt="root@.*:/.*#"):
+    if pkg != "":
+        pkg = "-" + pkg
+    if pkg == "-current":
+        deb = ""
+    else:
+        deb = pkg
+
+    chr.sendline("dpkg -i {0}/{1}-{2}-{3}/result/"
+                 "nvidia{5}-kernel-dkms"
+                 "_{4}_{3}.deb".format(pbuilder_base, base, dist, arch,
+                                       version, deb))
+    index = chr.expect(["Setting up nvidia{}-kernel-dkms".format(deb),
+               "Errors were encountered while processing"])
+    if index != 0:
+        raise Exception("Failed to dpkg -i {0}-{1}-{2}/result/"
+                 "nvidia{4}-kernel-dkms_{3}_{2}.deb".format(base, dist, arch,
+                                                         version, deb))
+    chr.expect(prompt)
+
+    dkms_arch = {"amd64": "x86_64", "i386": "i386", "armhf": "armv7l"}
+    header_arch = {"amd64": "amd64", "i386": "[4|5|6]86", "armhf": "armmp"}
+    chr.sendline("ls /usr/src |"
+                 " grep -e 'linux-headers.*{}'".format(header_arch[arch]))
+    chr.expect(prompt)
+    up_m = re.search("(.*)-\d+", version)
+    up_ver = up_m.group(1)
+    kernels = [m.group(1) for m in re.finditer("linux-headers-(.*)",
+                                    chr.before.decode("utf-8"))]
+    for k in kernels:
+        print("dkms install for kernel: {}".format(k))
+        chr.sendline("dkms install nvidia"
+                     "{}/{} -k {}/{}".format(pkg, up_ver, k, dkms_arch[arch]))
+        index = chr.expect(["DKMS: install completed", "Error"])
+        chr.expect(prompt)
+        if index != 0:
+            print("Failed to dkms install nvidia"
+                  "{}/{} -k {}/{}".format(pkg, up_ver, k, dkms_arch[arch]))
+            print(chr.before)
+            print(chr.after)
 
 
 if __name__ == "__main__":
