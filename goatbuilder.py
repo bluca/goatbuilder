@@ -27,6 +27,7 @@ import pexpect
 import re
 import shutil
 import subprocess
+import threading
 import time
 
 
@@ -237,6 +238,21 @@ def test_source(chr, pbuilder_base, base, dist, arch, version, pkg="current",
     chr.expect(prompt)
 
 
+def worker(pbuilder_base, base, dist, arch, version, pkg="current",
+              prompt="root@.*:/.*#"):
+    chr = start_chr(pbuilder_base, base, dist, arch)
+    try:
+        test_dkms(chr, pbuilder_base, base, dist, arch, version, pkg, prompt)
+        test_source(chr, pbuilder_base, base, dist, arch, version, pkg, prompt)
+    except Exception as e:
+        print(chr.before)
+        print(chr.after)
+        stop_chr(chr)
+        raise e
+    finally:
+        stop_chr(chr)
+
+
 if __name__ == "__main__":
     with open("/etc/pbuilderrc") as file:
         text = file.read()
@@ -253,6 +269,8 @@ if __name__ == "__main__":
                                      "bootstrapped cowbuilder chroot with a"
                                      "name in the format: "
                                      "<TARGET>-<DISTRIBUTION>-<ARCH>")
+    parser.add_argument('-b', '--build', action='store_false',
+                        help='Test dkms and source builds. Defaults to true.')
     parser.add_argument('-u', '--update', action='store_true',
                         help='Update chroots. Defaults to false.')
     parser.add_argument('-c', '--copy', action='store_false',
@@ -274,6 +292,9 @@ if __name__ == "__main__":
     parser.add_argument('-a', '--archs', dest='archs', nargs='+',
                         default=["amd64", "i386", "armhf"],
                         help='amd64, i386 or armhf. Defaults to all of them.')
+    parser.add_argument('-r', '--prompt-regex', default='root@.*:/.*#',
+                        help="Regex that matches the chroot prompt, required "
+                        "for pexpect. Defaults to root@.*:/.*#")
     parser.add_argument('-n', '--nvidia-branch', default='current',
                         help="Branch of nvidia packages (current, "
                         "legacy-340xx, etc). Defaults to current.")
@@ -282,17 +303,33 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    for arch in args.archs:
-        if args.copy:
-            copy_pacs(args.pbuilder_base_path, args.source, args.target,
-                      args.distribution, arch, args.version,
-                      args.nvidia_branch)
     if args.update:
         update_all_chroots([args.source, args.target], [args.distribution],
                            args.archs)
 
-    if args.copy:
+    if args.build:
+        threads = []
         for arch in args.archs:
-            delete_pacs(args.pbuilder_base_path, args.target,
-                        args.distribution, arch, args.version,
-                        args.nvidia_branch)
+            if args.copy:
+                copy_pacs(args.pbuilder_base_path, args.source, args.target,
+                          args.distribution, arch, args.version,
+                          args.nvidia_branch)
+            t = threading.Thread(target=worker, args=(args.pbuilder_base_path,
+                                                      args.target,
+                                                      args.distribution, arch,
+                                                      args.version,
+                                                      args.nvidia_branch,
+                                                      args.prompt_regex))
+            t.start()
+            threads.append(t)
+            time.sleep(5)
+
+        for t in threads:
+            t.join()
+
+
+        if args.copy:
+            for arch in args.archs:
+                delete_pacs(args.pbuilder_base_path, args.target,
+                            args.distribution, arch, args.version,
+                            args.nvidia_branch)
