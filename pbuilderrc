@@ -1,0 +1,100 @@
+#!/bin/sh
+
+set -e
+
+: ${OS:="base"}
+
+if [ "$OS" == "base" -o "$OS" == "dkms" ]; then
+    MIRRORSITE="http://httpredir.debian.org/debian/"
+    COMPONENTS="main contrib non-free"
+    DEBOOTSTRAPOPTS=("${DEBOOTSTRAPOPTS[@]}"
+        "--keyring=/usr/share/keyrings/debian-archive-keyring.gpg")
+    : ${DIST:="sid"}
+    : ${ARCH:="amd64"}
+    if [ "$DIST" == "wheezy" ]; then
+        OTHERMIRROR="$OTHERMIRROR |deb $MIRRORSITE wheezy-backports $COMPONENTS"
+    fi
+elif [ "$OS" == "raspbian" ]; then
+    MIRRORSITE="http://mirrordirector.raspbian.org/raspbian/"
+    COMPONENTS="main contrib non-free rpi"
+    DEBOOTSTRAPOPTS=("${DEBOOTSTRAPOPTS[@]}"
+        "--keyring=/usr/share/keyrings/raspbian-archive-keyring.gpg")
+    : ${DIST:="jessie"}
+    : ${ARCH:="armhf"}
+elif [ "$OS" == "ubuntu" ]; then
+    MIRRORSITE="http://uk.archive.ubuntu.com/ubuntu/"
+    COMPONENTS="main restricted universe multiverse"
+    DEBOOTSTRAPOPTS=("${DEBOOTSTRAPOPTS[@]}"
+        "--keyring=/usr/share/keyrings/ubuntu-archive-keyring.gpg")
+else
+    echo "Unknown OS: $OS"
+    exit 1
+fi
+
+
+if [ "$DIST" == "" ]; then
+    echo "DIST is not set"
+    exit 1
+fi
+
+if [ "$ARCH" == "" ]; then
+    echo "ARCH is not set"
+    exit 1
+fi
+
+NAME="$OS-$DIST-$ARCH"
+
+if [ "$ARCH" == "armel" ] && [ "$(dpkg --print-architecture)" != "armel" ]; then
+    DEBOOTSTRAP="qemu-debootstrap"
+fi
+if [ "$ARCH" == "armhf" ] && [ "$(dpkg --print-architecture)" != "armhf" ]; then
+    DEBOOTSTRAP="qemu-debootstrap"
+fi
+if [ "$ARCH" == "arm64" ] && [ "$(dpkg --print-architecture)" != "arm64" ]; then
+    DEBOOTSTRAP="qemu-debootstrap"
+fi
+if [ "$ARCH" == "ppc64el" ] && [ "$(dpkg --print-architecture)" != "ppc64el" ]; then
+    DEBOOTSTRAP="qemu-debootstrap"
+fi
+
+AUTO_DEBSIGN="${AUTO_DEBSIGN:-no}"
+PDEBUILD_PBUILDER=cowbuilder
+
+if [ "$DIST" != "squeeze" ]; then
+    EXTRAPACKAGES="$EXTRAPACKAGES lintian libeatmydata1"
+fi
+
+if [ "$ARCH" == "amd64" ]; then
+    LD_LIBRARY_PATH=${LD_LIBRARY_PATH:+"$LD_LIBRARY_PATH:"}/usr/lib/x86_64-linux-gnu
+    if [ "$DIST" != "squeeze" ]; then
+        LD_PRELOAD=${LD_PRELOAD:+"$LD_PRELOAD "}libeatmydata.so
+    fi
+    export LD_LIBRARY_PATH LD_PRELOAD
+elif [ "$ARCH" == "i386" ]; then
+    LD_LIBRARY_PATH=${LD_LIBRARY_PATH:+"$LD_LIBRARY_PATH:"}/usr/lib/i386-linux-gnu
+    if [ "$DIST" != "squeeze" ]; then
+        LD_PRELOAD=${LD_PRELOAD:+"$LD_PRELOAD "}libeatmydata.so
+    fi
+    export LD_LIBRARY_PATH LD_PRELOAD
+fi
+
+DEBBUILDOPTS=-j5
+
+PBUILDER_BASE="/var/cache/pbuilder"
+COWBUILDER_BASE="/var/cache/pbuilder"
+DEBOOTSTRAPOPTS=("${DEBOOTSTRAPOPTS[@]}" "--arch=$ARCH")
+BASETGZ="$PBUILDER_BASE/$NAME.tgz"
+BASEPATH="$PBUILDER_BASE/$NAME.cow"
+DISTRIBUTION="$DIST"
+BUILDRESULT="$PBUILDER_BASE/$NAME/result/"
+APTCACHE="$PBUILDER_BASE/aptcache/"
+BUILDPLACE="$PBUILDER_BASE/build"
+HOOKDIR="$PBUILDER_BASE/hook.d/"
+
+# this is your configuration file for pbuilder.
+# the file in /usr/share/pbuilder/pbuilderrc is the default template.
+# /etc/pbuilderrc is the one meant for overwriting defaults in
+# the default template
+#
+# read pbuilderrc.5 document for notes on specific options.
+#MIRRORSITE=http://ftp.uk.debian.org/debian/
