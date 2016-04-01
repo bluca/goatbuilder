@@ -239,11 +239,15 @@ def test_source(chr, pbuilder_base, base, dist, arch, version, pkg="current",
 
 
 def worker(pbuilder_base, base, dist, arch, version, pkg="current",
-              prompt="root@.*:/.*#"):
+              prompt="root@.*:/.*#", dkms=True, source=True):
     chr = start_chr(pbuilder_base, base, dist, arch)
     try:
-        test_dkms(chr, pbuilder_base, base, dist, arch, version, pkg, prompt)
-        test_source(chr, pbuilder_base, base, dist, arch, version, pkg, prompt)
+        if dkms:
+            test_dkms(chr, pbuilder_base, base, dist, arch, version, pkg,
+                        prompt)
+        if source:
+            test_source(chr, pbuilder_base, base, dist, arch, version, pkg,
+                        prompt)
     except Exception as e:
         print(chr.before)
         print(chr.after)
@@ -300,6 +304,9 @@ if __name__ == "__main__":
                         "legacy-340xx, etc). Defaults to current.")
     parser.add_argument('-v', '--version', required=True,
                         help='Package version. Required.')
+    parser.add_argument('-l', '--ludicrous-speed', action='store_false',
+                        help="Test source and dkms builds in parallel, in"
+                        "separate chroots")
 
     args = parser.parse_args()
 
@@ -314,15 +321,42 @@ if __name__ == "__main__":
                 copy_pacs(args.pbuilder_base_path, args.source, args.target,
                           args.distribution, arch, args.version,
                           args.nvidia_branch)
-            t = threading.Thread(target=worker, args=(args.pbuilder_base_path,
-                                                      args.target,
-                                                      args.distribution, arch,
-                                                      args.version,
-                                                      args.nvidia_branch,
-                                                      args.prompt_regex))
-            t.start()
-            threads.append(t)
-            time.sleep(5)
+            if not args.ludicrous_speed:
+                t = threading.Thread(target=worker, args=(args.pbuilder_base_path,
+                                                          args.target,
+                                                          args.distribution,
+                                                          arch,
+                                                          args.version,
+                                                          args.nvidia_branch,
+                                                          args.prompt_regex))
+                t.start()
+                threads.append(t)
+                time.sleep(5)
+            else:
+                t = threading.Thread(target=worker, args=(args.pbuilder_base_path,
+                                                          args.target,
+                                                          args.distribution,
+                                                          arch,
+                                                          args.version,
+                                                          args.nvidia_branch,
+                                                          args.prompt_regex,
+                                                          True, False))
+                t.start()
+                threads.append(t)
+                time.sleep(5)
+
+                t = threading.Thread(target=worker, args=(args.pbuilder_base_path,
+                                                          args.target,
+                                                          args.distribution,
+                                                          arch,
+                                                          args.version,
+                                                          args.nvidia_branch,
+                                                          args.prompt_regex,
+                                                          False, True))
+                t.start()
+                threads.append(t)
+                time.sleep(5)
+
 
         for t in threads:
             t.join()
